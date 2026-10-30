@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Color Rush</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:#0b0d17;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    user-select:none;-webkit-user-select:none;touch-action:manipulation}
+  #app{position:fixed;inset:0;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  .bar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;font-weight:700;color:#9aa4c8;font-size:14px;letter-spacing:.4px}
+  .bar b{color:#fff;font-size:17px}
+  #stage{flex:1;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 14px}
+  #word{font-size:clamp(38px,13vw,86px);font-weight:900;letter-spacing:4px;line-height:1.05;text-align:center;
+    transition:transform .08s ease,opacity .15s}
+  #word.pop{transform:scale(1.14)}
+  #hint{position:absolute;bottom:6px;left:0;right:0;text-align:center;color:#5b6488;font-size:12px;letter-spacing:.6px}
+  #timerwrap{position:absolute;top:0;left:0;right:0;height:4px;background:#1b2038}
+  #timer{height:100%;width:100%;background:linear-gradient(90deg,#39f6ff,#7c5cff);transform-origin:left center}
+  #pad{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 14px calc(14px + env(safe-area-inset-bottom))}
+  .key{height:clamp(64px,13vh,104px);border:0;border-radius:16px;color:#0b0d17;font-weight:900;font-size:clamp(15px,3.6vw,22px);
+    letter-spacing:2px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 0 rgba(0,0,0,.28);transition:transform .06s,box-shadow .06s}
+  .key:active{transform:translateY(4px);box-shadow:0 2px 0 rgba(0,0,0,.28)}
+  .k-red{background:#ff4d5e}.k-blue{background:#3d8bff}.k-green{background:#37d67a}.k-yellow{background:#ffd23f}
+  #over{position:absolute;inset:0;background:rgba(8,10,20,.92);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:9;padding:20px}
+  #over h1{font-size:34px;color:#fff;font-weight:900;letter-spacing:2px}
+  #over p{color:#9aa4c8;font-size:15px;text-align:center;line-height:1.6}
+  #ovrscore{font-size:22px;color:#ffd23f;font-weight:900}
+  .btn{padding:13px 26px;border:0;border-radius:14px;font-weight:900;font-size:16px;letter-spacing:1px;color:#0b0d17;
+    background:#39f6ff;box-shadow:0 5px 0 rgba(0,0,0,.3)}
+  .btn.alt{background:#ffd23f}
+  .btn.ghost{background:#232a4a;color:#cfd6f5;box-shadow:none}
+  #mute{position:absolute;right:12px;bottom:12px;z-index:8;width:38px;height:38px;border-radius:12px;border:0;background:#1b2038;color:#8b95c2;font-size:16px}
+  #flash{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .18s}
+  #flash.good{background:rgba(55,214,122,.28);opacity:1}
+  #flash.bad{background:rgba(255,77,94,.30);opacity:1}
+  #start{position:absolute;inset:0;background:rgba(8,10,20,.94);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;z-index:10;padding:24px;text-align:center}
+  #start h1{font-size:clamp(30px,9vw,54px);color:#fff;font-weight:900;letter-spacing:2px}
+  #start .demo{width:120px;height:56px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:26px}
+  #start p{color:#9aa4c8;font-size:15px;max-width:380px;line-height:1.6}
+  #start .tip{color:#5b6488;font-size:13px}
+</style>
+<!-- PG_BRIDGE_START --><script src="https://bridge.playgama.com/v2/stable/playgama-bridge.js"></script>
+<script>
+/* 存档层：Playgama 规范要求玩家数据必须经 Bridge storage 持久化（禁止任何本地持久化方式） */
+/* 平台状态：广告期间暂停 + 静音（Playgama 要求广告显示时游戏必须暂停并静音） */
+window.PGSTATE = { paused:false, muted:false };
+window.__pgBridgeReady = { ready:false };
+window.PGSAVE = {
+  data: {},
+  pending: [],
+  get: function(k, dflt){ var v = this.data[k]; return (v === null || v === undefined) ? dflt : v; },
+  set: function(k, v){ this.data[k] = v; this.write(k, v); },
+  write: function(k, v){
+    if (!window.bridge || !window.bridge.storage) { this.pending.push([k, String(v)]); return; }
+    try { window.bridge.storage.set([k], [String(v)]).catch(function(){}); }
+    catch(e){ this.pending.push([k, String(v)]); }
+  },
+  flushPending: function(){
+    if (!this.pending.length || !window.bridge || !window.bridge.storage) return;
+    var p = this.pending; this.pending = [];
+    for (var i = 0; i < p.length; i++) {
+      try { window.bridge.storage.set([p[i][0]], [p[i][1]]).catch(function(){}); } catch(e){}
+    }
+  },
+  load: function(keys){
+    var self = this;
+    if (!window.bridge || !window.bridge.storage) return Promise.resolve(this.data);
+    return window.bridge.storage.get(keys).then(function(d){
+      if (d) keys.forEach(function(k, i){
+        var v = (d[k] !== undefined) ? d[k] : d[i];
+        if (v !== null && v !== undefined) self.data[k] = v;
+      });
+      self.flushPending();
+      return self.data;
+    }).catch(function(){ return self.data; });
+  }
+};
+(function(){
+  function boot(){
+    if (typeof window.bridge === 'undefined' || !window.bridge.initialize) { setTimeout(boot, 300); return; }
+    window.bridge.initialize().then(function(){
+      try{
+        if(bridge.social && bridge.social.isShareSupported){
+          var b0=$('btnShare0'), b1=$('btnShare1');
+          if(b0) b0.style.display=''; if(b1) b1.style.display='';
+        }
+      }catch(e){}
+      window.__pgBridgeReady.ready = true;
+      try{ window.bridge.platform.sendMessage('game_ready'); }catch(e){}
+      try{
+        window.bridge.platform.on(window.bridge.EVENT_NAME.PAUSE_STATE_CHANGED, function(p){ window.PGSTATE.paused = !!p; });
+        window.bridge.platform.on(window.bridge.EVENT_NAME.AUDIO_STATE_CHANGED, function(a){ window.PGSTATE.muted = !a; });
+      }catch(e){}
+      return window.PGSAVE.load(['cr_best','cr_muted']);
+    }).then(function(){
+      if (window.onPGSaveLoaded) window.onPGSaveLoaded();
+    }).catch(function(){});
+  }
+  boot();
+})();
+</script><!-- PG_BRIDGE_END -->
+</head>
+<body>
+<div id="app">
+  <div class="bar"><span>SCORE <b id="score">0</b></span><span>BEST <b id="best">0</b></span><span>STREAK <b id="streak">0</b></span><span>LIVES <b id="lives">3</b></span></div>
+  <div id="stage">
+    <div id="timerwrap"><div id="timer"></div></div>
+    <div id="word">READY</div>
+    <div id="hint">TAP THE BUTTON OF THE WORD'S COLOR</div>
+  </div>
+  <div id="pad">
+    <button class="key k-red" data-c="red">RED</button>
+    <button class="key k-blue" data-c="blue">BLUE</button>
+    <button class="key k-green" data-c="green">GREEN</button>
+    <button class="key k-yellow" data-c="yellow">YELLOW</button>
+  </div>
+  <button id="mute">♪</button>
+  <div id="flash"></div>
+
+  <div id="over">
+    <h1>GAME OVER</h1>
+    <div id="ovrscore">SCORE 0</div>
+    <p id="ovrtxt"></p>
+    <button class="btn" id="btnRetry">PLAY AGAIN</button>
+    <button class="btn alt" id="btnShare1" style="display:none">SHARE WITH FRIENDS</button>
+    <button class="btn alt" id="btnAd">WATCH AD · CONTINUE</button>
+    <button class="btn ghost" id="btnHome">MAIN MENU</button>
+  </div>
+
+  <div id="start">
+    <h1>COLOR RUSH</h1>
+    <div class="demo" style="background:#37d67a;color:#0b0d17">BLUE</div>
+    <p>The word says one color — but it is written in another.<br><b>Tap the button matching the INK color, not the word.</b></p>
+    <button class="btn" id="btnStart">TAP TO START</button>
+    <button class="btn alt" id="btnShare0" style="display:none">SHARE WITH FRIENDS</button>
+    <div class="tip">Faster every round · 3 lives · keep the streak</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ---------------- 广告适配（GD / Playgama 自动识别） ---------------- */
+  const SHARE_TEXT = "Made with AI. Brought to you by #PlaygamaMCP. Fine-tuned by me. Color Rush \u2192 https://playgama.ai/play/645nvslsjw5org #playgama #PlaygamaMCP #webdev #gamedev";
+  function pgShare(){
+    try{
+      if(!window.bridge || !bridge.social || !bridge.social.isShareSupported) return;
+      bridge.social.share('share').then(function(){}).catch(function(){
+        try{ bridge.social.share(SHARE_TEXT).catch(function(){}); }catch(e){}
+      });
+    }catch(e){}
+  }
+  const AD = {
+    available() { return !!(window.gdsdk || (window.bridge && window.bridge.advertisement)); },
+    interstitial(placement) {
+      try {
+        if (window.gdsdk && window.gdsdk.showAd) { window.gdsdk.showAd(); return true; }
+        if (window.__pgBridgeReady.ready && window.bridge && window.bridge.advertisement && window.bridge.advertisement.isInterstitialSupported) {
+          window.bridge.advertisement.showInterstitial(placement || 'game_start'); return true;
+        }
+      } catch (e) {}
+      return false;
+    },
+    rewarded(onDone) {
+      try {
+        if (window.gdsdk && window.gdsdk.showAd) {
+          window.__crReward = onDone;
+          window.gdsdk.showAd('rewarded');
+          return true;
+        }
+        if (window.__pgBridgeReady.ready && window.bridge && window.bridge.advertisement && window.bridge.advertisement.isRewardedSupported) {
+          window.__crReward = onDone;
+          window.bridge.advertisement.on(window.bridge.EVENT_NAME.REWARDED_STATE_CHANGED, st => { if (st === 'rewarded' && window.__crReward) { const f = window.__crReward; window.__crReward = null; f(); } });
+          window.bridge.advertisement.showRewarded('revive');
+          return true;
+        }
+        if (window.bridge && window.bridge.initialize) {
+          // Bridge 尚未初始化完成：等就绪后展示真实广告，不伪造奖励
+          let tries = 0;
+          const ivw = setInterval(() => {
+            tries++;
+            if (window.__pgBridgeReady.ready && window.bridge && window.bridge.advertisement && window.bridge.advertisement.isRewardedSupported) {
+              clearInterval(ivw);
+              window.__crReward = onDone;
+              window.bridge.advertisement.on(window.bridge.EVENT_NAME.REWARDED_STATE_CHANGED, st => { if (st === 'rewarded' && window.__crReward) { const f = window.__crReward; window.__crReward = null; f(); } });
+              window.bridge.advertisement.showRewarded('revive');
+              return;
+            }
+            if (tries > 40) { clearInterval(ivw); onDone(); }
+          }, 500);
+          return true;
+        }
+      } catch (e) { onDone(); return false; }
+      setTimeout(onDone, 1500);
+      return false;
+    }
+  };
+  // GD 的 SDK 事件统一转给游戏
+  window.onAdEvent = function (name) {
+    if (name === 'SDK_REWARDED_WATCH_COMPLETE' && window.__crReward) { const f = window.__crReward; window.__crReward = null; f(); }
+  };
+
+  /* ---------------- 音效 ---------------- */
+  let actx = null, muted = false;
+  function audio() {
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (actx && actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  function beep(freq, dur, type, gain) {
+    if (muted || (window.PGSTATE && window.PGSTATE.muted)) return;
+    const a = audio(); if (!a) return;
+    try {
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(gain || 0.05, a.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
+      o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + dur);
+    } catch (e) {}
+  }
+  const sfx = {
+    good(streak) { beep(620 + Math.min(streak, 12) * 45, 0.10, 'square', 0.05); },
+    bad() { beep(150, 0.26, 'sawtooth', 0.07); },
+    start() { beep(520, 0.09, 'triangle', 0.05); setTimeout(() => beep(780, 0.12, 'triangle', 0.05), 90); },
+    over() { beep(300, 0.18, 'sawtooth', 0.06); setTimeout(() => beep(180, 0.34, 'sawtooth', 0.06), 140); },
+    revive() { beep(700, 0.1, 'triangle', 0.06); setTimeout(() => beep(950, 0.16, 'triangle', 0.06), 90); }
+  };
+
+  /* ---------------- 游戏状态 ---------------- */
+  const COLORS = ['red', 'blue', 'green', 'yellow'];
+  const INK = { red: '#ff4d5e', blue: '#3d8bff', green: '#37d67a', yellow: '#ffd23f' };
+  const $ = id => document.getElementById(id);
+  const el = {
+    score: $('score'), best: $('best'), streak: $('streak'), word: $('word'), timer: $('timer'),
+    over: $('over'), start: $('start'), flash: $('flash'), ovrscore: $('ovrscore'), ovrtxt: $('ovrtxt'),
+    btnRetry: $('btnRetry'), btnAd: $('btnAd'), btnHome: $('btnHome'), btnStart: $('btnStart'), mute: $('mute'), lives: $('lives')
+  };
+  let score = 0, streak = 0, lives = 3, round = 0, state = 'menu', curInk = 'red';
+  let runRounds = 0, autoTimer = null;
+  let timerId = null, deadline = 0, roundMs = 2200;
+
+  function setBest() {
+    const b = +(window.PGSAVE.get('cr_best', 0));
+    el.best.textContent = b;
+    return b;
+  }
+  setBest();
+  // Bridge storage 读取完成后刷新 UI（最高分 / 静音设置）
+  window.onPGSaveLoaded = function(){
+    muted = (window.PGSAVE.get('cr_muted', '0') === '1');
+    if (el.mute) el.mute.textContent = muted ? '✕' : '♪';
+    setBest();
+  };
+
+  function flash(cls) {
+    el.flash.className = cls;
+    setTimeout(() => { el.flash.className = ''; }, 170);
+  }
+
+  function newRound() {
+    round++;
+    // 难度：显示时间逐轮压缩
+    roundMs = Math.max(620, 2200 - (round - 1) * 110);
+    const word = COLORS[Math.floor(Math.random() * 4)];
+    let ink = COLORS[Math.floor(Math.random() * 4)];
+    while (ink === word) ink = COLORS[Math.floor(Math.random() * 4)];
+    curInk = ink;
+    el.word.textContent = word.toUpperCase();
+    el.word.style.color = INK[ink];
+    el.word.classList.remove('pop');
+    void el.word.offsetWidth;
+    el.word.classList.add('pop');
+    deadline = performance.now() + roundMs;
+    el.timer.style.transform = 'scaleX(1)';
+    cancelAnimationFrame(timerId);
+    const tick = () => {
+      if (window.PGSTATE && window.PGSTATE.paused) {
+        deadline += 50;                       // 广告期间冻结回合计时，恢复后时间不流失
+        timerId = requestAnimationFrame(tick);
+        return;
+      }
+      const left = Math.max(0, deadline - performance.now());
+      el.timer.style.transform = 'scaleX(' + (left / roundMs) + ')';
+      if (left <= 0) { timeout(); return; }
+      timerId = requestAnimationFrame(tick);
+    };
+    timerId = requestAnimationFrame(tick);
+  }
+
+  function timeout() {
+    if (state !== 'play') return;
+    flash('bad');
+    sfx.bad();
+    streak = 0; el.streak.textContent = 0;
+    lives--; refreshLives();
+    if (lives <= 0) { gameOver(); return; }
+    setTimeout(newRound, 420);
+  }
+
+  function refreshLives() { if (el.lives) el.lives.textContent = lives; }
+  function answer(c) {
+    if (state !== 'play') return;
+    if (c === curInk) {
+      streak++;
+      score += 10 + Math.min(streak, 10) * 2;
+      el.score.textContent = score;
+      el.streak.textContent = streak;
+      if (streak % 5 === 0 && lives < 5) { lives++; refreshLives(); }   // 每 5 连击送一条命，拉长单局
+      sfx.good(streak);
+      flash('good');
+      cancelAnimationFrame(timerId);
+      setTimeout(newRound, 240);
+    } else {
+      sfx.bad();
+      flash('bad');
+      streak = 0; el.streak.textContent = 0;
+      lives--; refreshLives();
+      cancelAnimationFrame(timerId);
+      if (lives <= 0) { gameOver(); return; }
+      setTimeout(newRound, 520);
+    }
+  }
+
+  function gameOver() {
+    state = 'over';
+    cancelAnimationFrame(timerId);
+    sfx.over();
+    const b = +(window.PGSAVE.get('cr_best', 0));
+    if (score > b) { window.PGSAVE.set('cr_best', score); }
+    el.best.textContent = Math.max(b, score);
+    el.ovrscore.textContent = 'SCORE ' + score + '   ·   BEST ' + Math.max(b, score);
+    el.ovrtxt.textContent = 'Round ' + round + ' reached  ·  run ' + runRounds + '  ·  next run in 1s';
+    el.over.style.display = 'flex';
+    // 自动续玩：1.2 秒后直接开下一局（分数/轮次跨局累计），玩家点 MAIN MENU 才退出
+    if (autoTimer) clearTimeout(autoTimer);
+    autoTimer = setTimeout(function(){ if (state === 'over') startGame(); }, 1200);
+  }
+
+  function startGame() {
+    // 分数与轮次跨局累计（玩家有累积感，不会觉得白玩一局）
+    streak = 0; lives = 3; runRounds++;
+    el.streak.textContent = 0; refreshLives();
+    el.over.style.display = 'none';
+    el.start.style.display = 'none';
+    state = 'play';
+    sfx.start();
+    AD.interstitial('game_start');
+    setTimeout(newRound, 380);
+  }
+
+  document.querySelectorAll('.key').forEach(b => {
+    b.addEventListener('pointerdown', e => { e.preventDefault(); answer(b.dataset.c); });
+  });
+  function freshRun(){ if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    score = 0; round = 0; runRounds = 0; el.score.textContent = 0; startGame(); }
+  $('btnShare0').addEventListener('click', pgShare);
+  $('btnShare1').addEventListener('click', pgShare);
+  el.btnStart.addEventListener('click', freshRun);
+  el.btnRetry.addEventListener('click', freshRun);
+  el.btnHome.addEventListener('click', () => {
+    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    el.over.style.display = 'none'; el.start.style.display = 'flex'; state = 'menu';
+  });
+  el.btnAd.addEventListener('click', () => {
+    el.btnAd.disabled = true;
+    setTimeout(() => { el.btnAd.disabled = false; }, 4000);   // 广告未完成时恢复可点，避免卡死
+    AD.rewarded(() => {
+      el.btnAd.disabled = false;
+      el.over.style.display = 'none';
+      lives = 1;
+      state = 'play';
+      sfx.revive();
+      setTimeout(newRound, 420);
+    });
+  });
+  el.mute.addEventListener('click', () => {
+    muted = !muted;
+    window.PGSAVE.set('cr_muted', muted ? '1' : '0');
+    el.mute.textContent = muted ? '✕' : '♪';
+  });
+  el.mute.textContent = muted ? '✕' : '♪';
+
+  // 空格/回车 = 随机色（键盘玩家）
+  document.addEventListener('keydown', e => {
+    if (state === 'menu' && (e.code === 'Space' || e.code === 'Enter')) { startGame(); e.preventDefault(); }
+    else if (state === 'play' && (e.code === 'Space' || e.code === 'Enter')) {
+      const c = COLORS[Math.floor(Math.random() * 4)];
+      answer(c); e.preventDefault();
+    } else if (state === 'over' && (e.code === 'Space' || e.code === 'Enter')) { startGame(); e.preventDefault(); }
+  });
+
+  // 防止双击缩放/滚动
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
+})();
+</script>
+</body>
+</html>
