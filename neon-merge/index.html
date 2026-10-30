@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Neon Merge</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:#0a0c16;font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    user-select:none;-webkit-user-select:none;touch-action:none}
+  #app{position:fixed;inset:0;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  .bar{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;font-weight:700;color:#8b95c2;font-size:14px;letter-spacing:.5px}
+  .bar b{color:#fff;font-size:18px}
+  #stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:6px 14px}
+  #board{position:relative;width:min(94vw,52vh);aspect-ratio:1/1;border-radius:16px;background:#12162a;
+    box-shadow:0 0 0 2px #1e2440, 0 12px 40px rgba(0,0,0,.5);touch-action:none}
+  .cell{position:absolute;width:21%;height:21%;border-radius:10px;background:#1a2038}
+  .tile{position:absolute;width:21%;height:21%;border-radius:10px;display:flex;align-items:center;justify-content:center;
+    font-weight:900;color:#0a0c16;transition:transform .1s ease;will-change:transform}
+  .tile.new{animation:pop .13s ease}
+  @keyframes pop{from{transform:scale(.55)}to{transform:scale(1)}}
+  .tile span{pointer-events:none}
+  #side{display:flex;gap:10px;align-items:center}
+  .chip{background:#1a2038;color:#9aa4c8;border-radius:12px;padding:8px 14px;font-weight:800;font-size:13px;letter-spacing:.6px}
+  .chip b{color:#ffd23f;font-size:15px}
+  #hint{color:#4e5678;font-size:12px;letter-spacing:.5px;text-align:center;min-height:15px}
+  #over{position:absolute;inset:0;background:rgba(8,10,20,.93);display:none;flex-direction:column;align-items:center;justify-content:center;gap:13px;z-index:9;padding:20px;text-align:center}
+  #over h1{font-size:32px;color:#fff;font-weight:900;letter-spacing:2px}
+  #ovrscore{font-size:20px;color:#ffd23f;font-weight:900}
+  #ovrtxt{color:#9aa4c8;font-size:14px;line-height:1.6}
+  .btn{padding:12px 24px;border:0;border-radius:14px;font-weight:900;font-size:15px;letter-spacing:1px;color:#0a0c16;background:#39f6ff;box-shadow:0 5px 0 rgba(0,0,0,.3)}
+  .btn.alt{background:#ffd23f}
+  .btn.ghost{background:#232a4a;color:#cfd6f5;box-shadow:none}
+  #start{position:absolute;inset:0;background:rgba(8,10,20,.95);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:10;padding:24px;text-align:center}
+  #start h1{font-size:clamp(30px,9vw,52px);color:#fff;font-weight:900;letter-spacing:2px}
+  #start p{color:#9aa4c8;font-size:15px;max-width:360px;line-height:1.6}
+  .demo{display:flex;gap:6px;margin:4px 0}
+  .demo i{width:44px;height:44px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-style:normal;font-weight:900;color:#0a0c16;font-size:17px}
+  #mute{position:absolute;right:12px;bottom:12px;z-index:8;width:36px;height:36px;border-radius:11px;border:0;background:#1a2038;color:#8b95c2;font-size:15px}
+</style>
+<!-- PG_BRIDGE_START --><script src="https://bridge.playgama.com/v2/stable/playgama-bridge.js"></script>
+<script>
+/* 存档层：Playgama 规范要求玩家数据必须经 Bridge storage 持久化（禁止任何本地持久化方式） */
+/* 平台状态：广告期间暂停 + 静音（Playgama 要求广告显示时游戏必须暂停并静音） */
+window.PGSTATE = { paused:false, muted:false };
+window.__pgBridgeReady = { ready:false };
+window.PGSAVE = {
+  data: {},
+  pending: [],
+  get: function(k, dflt){ var v = this.data[k]; return (v === null || v === undefined) ? dflt : v; },
+  set: function(k, v){ this.data[k] = v; this.write(k, v); },
+  write: function(k, v){
+    if (!window.bridge || !window.bridge.storage) { this.pending.push([k, String(v)]); return; }
+    try { window.bridge.storage.set([k], [String(v)]).catch(function(){}); }
+    catch(e){ this.pending.push([k, String(v)]); }
+  },
+  flushPending: function(){
+    if (!this.pending.length || !window.bridge || !window.bridge.storage) return;
+    var p = this.pending; this.pending = [];
+    for (var i = 0; i < p.length; i++) {
+      try { window.bridge.storage.set([p[i][0]], [p[i][1]]).catch(function(){}); } catch(e){}
+    }
+  },
+  load: function(keys){
+    var self = this;
+    if (!window.bridge || !window.bridge.storage) return Promise.resolve(this.data);
+    return window.bridge.storage.get(keys).then(function(d){
+      if (d) keys.forEach(function(k, i){
+        var v = (d[k] !== undefined) ? d[k] : d[i];
+        if (v !== null && v !== undefined) self.data[k] = v;
+      });
+      self.flushPending();
+      return self.data;
+    }).catch(function(){ return self.data; });
+  }
+};
+(function(){
+  function boot(){
+    if (typeof window.bridge === 'undefined' || !window.bridge.initialize) { setTimeout(boot, 300); return; }
+    window.bridge.initialize().then(function(){
+      try{
+        if(bridge.social && bridge.social.isShareSupported){
+          var b0=$('btnShare0'), b1=$('btnShare1');
+          if(b0) b0.style.display=''; if(b1) b1.style.display='';
+        }
+      }catch(e){}
+      window.__pgBridgeReady.ready = true;
+      try{ window.bridge.platform.sendMessage('game_ready'); }catch(e){}
+      try{
+        window.bridge.platform.on(window.bridge.EVENT_NAME.PAUSE_STATE_CHANGED, function(p){ window.PGSTATE.paused = !!p; });
+        window.bridge.platform.on(window.bridge.EVENT_NAME.AUDIO_STATE_CHANGED, function(a){ window.PGSTATE.muted = !a; });
+      }catch(e){}
+      return window.PGSAVE.load(['nm_best','nm_muted']);
+    }).then(function(){
+      if (window.onPGSaveLoaded) window.onPGSaveLoaded();
+    }).catch(function(){});
+  }
+  boot();
+})();
+</script><!-- PG_BRIDGE_END -->
+</head>
+<body>
+<div id="app">
+  <div class="bar"><span>SCORE <b id="score">0</b></span><span>BEST <b id="best">0</b></span><span>MOVES <b id="moves">0</b></span><span>RUN <b id="runno">1</b></span></div>
+  <div id="stage">
+    <div id="side">
+      <div class="chip">NEXT <b id="next">2</b></div>
+      <div class="chip">TILE <b id="tile">2</b></div>
+      <div class="chip" id="undoChip">UNDO <b id="undo">1</b></div>
+    </div>
+    <div id="board"></div>
+    <div id="hint">SWIPE OR USE ARROW KEYS · MATCH TWO EQUAL TILES TO MERGE</div>
+  </div>
+  <button id="mute">♪</button>
+  <div id="over">
+    <h1>NO MOVES LEFT</h1>
+    <div id="ovrscore">SCORE 0</div>
+    <div id="ovrtxt"></div>
+    <button class="btn" id="btnRetry">NEW GAME</button>
+    <button class="btn alt" id="btnShare1" style="display:none">SHARE WITH FRIENDS</button>
+    <button class="btn alt" id="btnAd">WATCH AD · KEEP PLAYING</button>
+    <button class="btn ghost" id="btnHome">MAIN MENU</button>
+  </div>
+  <div id="start">
+    <h1>NEON MERGE</h1>
+    <div class="demo">
+      <i style="background:#7ef0ff">2</i><i style="background:#7ef0ff">2</i>
+      <i style="background:#ffd23f">4</i>
+    </div>
+    <p>Slide the tiles. <b>Two equal tiles merge into one.</b><br>Build the biggest number you can before the board locks up.</p>
+    <button class="btn" id="btnStart">TAP TO START</button>
+    <button class="btn alt" id="btnShare0" style="display:none">SHARE WITH FRIENDS</button>
+    <div style="color:#4e5678;font-size:12px;margin-top:6px">One undo per game · watch an ad to keep playing</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ---------------- 广告适配（GD / Playgama） ---------------- */
+  const SHARE_TEXT = "Made with AI. Brought to you by #PlaygamaMCP. Fine-tuned by me. Neon Merge \u2192 https://playgama.ai/play/guj2egc6l6omgv #playgama #PlaygamaMCP #webdev #gamedev";
+  function pgShare(){
+    try{
+      if(!window.bridge || !bridge.social || !bridge.social.isShareSupported) return;
+      bridge.social.share('share').then(function(){}).catch(function(){
+        try{ bridge.social.share(SHARE_TEXT).catch(function(){}); }catch(e){}
+      });
+    }catch(e){}
+  }
+  const AD = {
+    interstitial(pl) {
+      try {
+        if (window.gdsdk && window.gdsdk.showAd) { window.gdsdk.showAd(); return true; }
+        if (window.__pgBridgeReady.ready && window.bridge && window.bridge.advertisement && window.bridge.advertisement.isInterstitialSupported) {
+          window.bridge.advertisement.showInterstitial(pl || 'game_start'); return true;
+        }
+      } catch (e) {}
+      return false;
+    },
+    rewarded(onDone) {
+      try {
+        if (window.gdsdk && window.gdsdk.showAd) { window.__nmReward = onDone; window.gdsdk.showAd('rewarded'); return true; }
+        if (window.__pgBridgeReady.ready && window.bridge && window.bridge.advertisement && window.bridge.advertisement.isRewardedSupported) {
+          window.__nmReward = onDone;
+          window.bridge.advertisement.on(window.bridge.EVENT_NAME.REWARDED_STATE_CHANGED, st => { if (st === 'rewarded' && window.__nmReward) { const f = window.__nmReward; window.__nmReward = null; f(); } });
+          window.bridge.advertisement.showRewarded('continue');
+          return true;
+        }
+        if (window.bridge && window.bridge.initialize) {
+          // Bridge 尚未初始化完成：等就绪后展示真实广告，不伪造奖励
+          let tries = 0;
+          const ivw = setInterval(() => {
+            tries++;
+            if (window.__pgBridgeReady.ready && window.bridge && window.bridge.advertisement && window.bridge.advertisement.isRewardedSupported) {
+              clearInterval(ivw);
+              window.__nmReward = onDone;
+              window.bridge.advertisement.on(window.bridge.EVENT_NAME.REWARDED_STATE_CHANGED, st => { if (st === 'rewarded' && window.__nmReward) { const f = window.__nmReward; window.__nmReward = null; f(); } });
+              window.bridge.advertisement.showRewarded('continue');
+              return;
+            }
+            if (tries > 40) { clearInterval(ivw); onDone(); }
+          }, 500);
+          return true;
+        }
+      } catch (e) { onDone(); return false; }
+      setTimeout(onDone, 1500);
+      return false;
+    }
+  };
+  window.onAdEvent = function (name) {
+    if (name === 'SDK_REWARDED_WATCH_COMPLETE' && window.__nmReward) { const f = window.__nmReward; window.__nmReward = null; f(); }
+  };
+
+  /* ---------------- 音效 ---------------- */
+  let actx = null, muted = false;
+  function audio() {
+    if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (actx && actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+  function tone(freq, dur, type, gain) {
+    if (muted || (window.PGSTATE && window.PGSTATE.muted)) return;
+    const a = audio(); if (!a) return;
+    try {
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = type || 'square'; o.frequency.value = freq;
+      g.gain.setValueAtTime(gain || 0.04, a.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
+      o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + dur);
+    } catch (e) {}
+  }
+  const sfx = {
+    slide() { tone(320, 0.05, 'sine', 0.03); },
+    merge(v) { tone(420 + Math.min(v, 4096) / 24, 0.10, 'triangle', 0.05); },
+    bad() { tone(150, 0.2, 'sawtooth', 0.06); },
+    over() { tone(300, 0.16, 'sawtooth', 0.05); setTimeout(() => tone(190, 0.3, 'sawtooth', 0.05), 130); },
+    revive() { tone(660, 0.09, 'triangle', 0.05); setTimeout(() => tone(880, 0.14, 'triangle', 0.05), 80); }
+  };
+
+  /* ---------------- 常量与配色 ---------------- */
+  const N = 4;
+  const COLORS = {
+    2: ['#7ef0ff', '#0a0c16'], 4: ['#7ef0ff', '#0a0c16'], 8: ['#59f0a0', '#0a0c16'],
+    16: ['#6ee06e', '#0a0c16'], 32: ['#ffd23f', '#0a0c16'], 64: ['#ffa23f', '#0a0c16'],
+    128: ['#ff8a3f', '#0a0c16'], 256: ['#ff5e7a', '#ffffff'], 512: ['#ff4d5e', '#ffffff'],
+    1024: ['#c46bff', '#ffffff'], 2048: ['#a06bff', '#ffffff'], 4096: ['#7b6bff', '#ffffff']
+  };
+  const $ = id => document.getElementById(id);
+  const board = $('board');
+  let grid, score, moves, over, started, undoLeft, undoState, nextVal, tileVal, lastMoveAt = 0;
+  let runRounds = 1, autoTimer = null;
+
+  const el = { score: $('score'), best: $('best'), moves: $('moves'), next: $('next'), tile: $('tile'),
+    undo: $('undo'), over: $('over'), start: $('start'), ovrscore: $('ovrscore'), ovrtxt: $('ovrtxt'),
+    btnRetry: $('btnRetry'), btnAd: $('btnAd'), btnHome: $('btnHome'), btnStart: $('btnStart'), mute: $('mute'),
+    runno: $('runno') };
+
+  function bestScore() { return +(window.PGSAVE.get('nm_best', 0)); }
+  el.best.textContent = bestScore();
+  // Bridge storage 读取完成后刷新 UI（最高分 / 静音设置）
+  window.onPGSaveLoaded = function(){
+    muted = (window.PGSAVE.get('nm_muted', '0') === '1');
+    if (el.mute) el.mute.textContent = muted ? '✕' : '♪';
+    el.best.textContent = bestScore();
+  };
+
+  function valColor(v) { return COLORS[v] || ['#ffffff', '#0a0c16']; }
+
+  function buildCells() {
+    board.innerHTML = '';
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const d = document.createElement('div');
+      d.className = 'cell';
+      d.style.left = (c * 25 + 2) + '%';
+      d.style.top = (r * 25 + 2) + '%';
+      board.appendChild(d);
+    }
+  }
+
+  function render() {
+    const cells = board.querySelectorAll('.cell');
+    const tiles = board.querySelectorAll('.tile');
+    tiles.forEach(t => t.remove());
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const v = grid[r][c];
+      if (!v) continue;
+      const col = valColor(v);
+      const t = document.createElement('div');
+      t.className = 'tile';
+      t.style.left = (c * 25 + 2) + '%';
+      t.style.top = (r * 25 + 2) + '%';
+      t.style.background = col[0];
+      t.style.color = col[1];
+      t.style.fontSize = (v >= 1000 ? 15 : v >= 100 ? 18 : 21) + 'px';
+      t.innerHTML = '<span>' + v + '</span>';
+      board.appendChild(t);
+    }
+    el.score.textContent = score;
+    el.moves.textContent = moves;
+    el.next.textContent = nextVal;
+    el.tile.textContent = tileVal;
+    el.undo.textContent = undoLeft;
+    if (el.runno) el.runno.textContent = runRounds;
+  }
+
+  function emptyCells() {
+    const out = [];
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (!grid[r][c]) out.push([r, c]);
+    return out;
+  }
+  function addTile(r, c, v, isNew) {
+    grid[r][c] = v;
+    if (isNew) {
+      const t = document.createElement('div');
+      const col = valColor(v);
+      t.className = 'tile new';
+      t.style.left = (c * 25 + 2) + '%';
+      t.style.top = (r * 25 + 2) + '%';
+      t.style.background = col[0]; t.style.color = col[1];
+      t.style.fontSize = (v >= 1000 ? 15 : v >= 100 ? 18 : 21) + 'px';
+      t.innerHTML = '<span>' + v + '</span>';
+      board.appendChild(t);
+    }
+  }
+  function randTile() {
+    const e = emptyCells();
+    if (!e.length) return;
+    const p = e[Math.floor(Math.random() * e.length)];
+    addTile(p[0], p[1], tileVal, true);
+    // 下一块
+    tileVal = Math.random() < 0.88 ? 2 : 4;
+    nextVal = Math.random() < 0.85 ? 2 : 4;
+  }
+  function cloneGrid(g) { return g.map(row => row.slice()); }
+
+  function move(dir) {
+    const now = performance.now();
+    if (over || !started) return;
+    if (window.PGSTATE && window.PGSTATE.paused) return;   // 广告期间不接受输入
+    if (now - lastMoveAt < 70) return;   // 防同帧重复处理（不用定时器，避免后台标签页被节流后卡死）
+    lastMoveAt = now;
+    const before = cloneGrid(grid);
+    let moved = false, gained = 0, mergedMax = 0;
+    const rev = (dir === 'left' || dir === 'right');
+    const lines = [];
+    for (let i = 0; i < N; i++) {
+      let line = [];
+      for (let j = 0; j < N; j++) line.push(grid[rev ? i : j][rev ? (dir === 'left' ? j : N - 1 - j) : i]);
+      lines.push(line);
+    }
+    for (let i = 0; i < N; i++) {
+      let line = lines[i].filter(v => v !== 0);
+      const merged = [];
+      for (let k = 0; k < line.length; k++) {
+        if (k + 1 < line.length && line[k] === line[k + 1]) {
+          const v = line[k] * 2;
+          merged.push(v); gained += v; mergedMax = Math.max(mergedMax, v); k++;
+        } else merged.push(line[k]);
+      }
+      while (merged.length < N) merged.push(0);
+      lines[i] = merged;
+    }
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const v = lines[i][rev ? (dir === 'left' ? j : N - 1 - j) : j];
+      grid[rev ? i : j][rev ? (dir === 'left' ? j : N - 1 - j) : i] = v;
+      if (v !== before[rev ? i : j][rev ? (dir === 'left' ? j : N - 1 - j) : i]) moved = true;
+    }
+    if (!moved) { sfx.slide(); return; }
+    moves++;
+    score += gained;
+    undoLeft = Math.max(0, undoLeft - 0);
+    undoState = { grid: before, score: score - gained, moves: moves - 1 };
+    if (gained > 0) sfx.merge(mergedMax); else sfx.slide();
+    randTile();
+    render();
+    requestAnimationFrame(() => checkOver());
+  }
+
+  function canMove() {
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      if (!grid[r][c]) return true;
+      if (c + 1 < N && grid[r][c] === grid[r][c + 1]) return true;
+      if (r + 1 < N && grid[r][c] === grid[r + 1][c]) return true;
+    }
+    return false;
+  }
+  function checkOver() {
+    if (canMove()) return;
+    over = true;
+    sfx.over();
+    const b = bestScore();
+    if (score > b) window.PGSAVE.set('nm_best', score);
+    el.best.textContent = Math.max(b, score);
+    el.ovrscore.textContent = 'SCORE ' + score + '   ·   BEST ' + Math.max(b, score);
+    el.ovrtxt.textContent = 'Biggest tile: ' + biggest() + '  ·  run ' + runRounds + '  ·  next run in 1s';
+    el.over.style.display = 'flex';
+    // 自动续玩：1.2 秒后直接开下一局（分数跨局累计），玩家点 MAIN MENU 才退出
+    if (autoTimer) clearTimeout(autoTimer);
+    autoTimer = setTimeout(function(){ if (over) startGame(true); }, 1200);
+  }
+  function biggest() {
+    let m = 0;
+    grid.forEach(row => row.forEach(v => { if (v > m) m = v; }));
+    return m;
+  }
+
+  function startGame(keepScore) {
+    grid = Array.from({ length: N }, () => new Array(N).fill(0));
+    // 分数跨局累计（玩家有累积感）；步数与撤销每局重置
+    if (!keepScore) { score = 0; runRounds = 1; } else { runRounds++; }
+    el.score.textContent = score;
+    moves = 0; over = false; started = true; undoLeft = 3; lastMoveAt = 0;   // 撤销 1 -> 3 次，延长单局
+    nextVal = 2; tileVal = 2;
+    buildCells();
+    randTile(); randTile();
+    render();
+    el.over.style.display = 'none';
+    el.start.style.display = 'none';
+    AD.interstitial('game_start');
+  }
+
+  function undo() {
+    if (over || !undoState || undoLeft <= 0) return;
+    grid = cloneGrid(undoState.grid);
+    score = undoState.score; moves = undoState.moves;
+    undoLeft = Math.max(0, undoLeft - 1); undoState = null;
+    sfx.slide();
+    render();
+  }
+
+  function freshRun(){ if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    score = 0; runRounds = 1; el.score.textContent = 0; if (el.runno) el.runno.textContent = 1; startGame(false); }
+  $('btnShare0').addEventListener('click', pgShare);
+  $('btnShare1').addEventListener('click', pgShare);
+  el.btnStart.addEventListener('click', freshRun);
+  el.btnRetry.addEventListener('click', freshRun);
+  el.btnHome.addEventListener('click', () => { if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    el.over.style.display = 'none'; el.start.style.display = 'flex'; started = false; });
+  el.btnAd.addEventListener('click', () => {
+    el.btnAd.disabled = true;
+    setTimeout(() => { el.btnAd.disabled = false; }, 4000);   // 广告未完成时恢复可点，避免卡死
+    AD.rewarded(() => {
+      el.btnAd.disabled = false;
+      el.over.style.display = 'none';
+      over = false; started = true;
+      sfx.revive();
+      // 放一块 2 让玩家能继续
+      const e = emptyCells();
+      if (e.length) { const p = e[Math.floor(Math.random() * e.length)]; addTile(p[0], p[1], 2, true); }
+      render();
+    });
+  });
+  $('undoChip').addEventListener('click', undo);
+  el.mute.addEventListener('click', () => {
+    muted = !muted;
+    window.PGSAVE.set('nm_muted', muted ? '1' : '0');
+    el.mute.textContent = muted ? '✕' : '♪';
+  });
+  el.mute.textContent = muted ? '✕' : '♪';
+
+  /* ---------------- 触控与键盘 ---------------- */
+  let sx = 0, sy = 0, tracking = false;
+  board.addEventListener('pointerdown', e => { sx = e.clientX; sy = e.clientY; tracking = true; });
+  board.addEventListener('pointerup', e => {
+    if (!tracking) return; tracking = false;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    if (Math.abs(dx) < 24 && Math.abs(dy) < 24) return;
+    if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 'right' : 'left');
+    else move(dy > 0 ? 'down' : 'up');
+  });
+  document.addEventListener('keydown', e => {
+    const map = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+    if (map[e.key]) { move(map[e.key]); e.preventDefault(); }
+    else if (e.key === 'u' || e.key === 'U') undo();
+    else if ((e.code === 'Space' || e.code === 'Enter') && !started) { startGame(); e.preventDefault(); }
+  });
+})();
+</script>
+</body>
+</html>
