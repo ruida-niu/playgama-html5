@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="description" content="Neon Dodge — dodge the red blocks, grab the gold coins. Free hypercasual arcade game." />
+<title>Neon Dodge — Free Hypercasual Arcade Game</title>
+<style>
+  :root { --bg:#0a0a14; --neon:#39f6ff; --gold:#ffd23f; --danger:#ff3b6b; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; background:var(--bg); color:#e8eaff;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
+  #wrap { position:relative; width:100vw; height:100dvh; display:flex; align-items:center; justify-content:center; }
+  canvas { background:#0d0d1f; box-shadow:0 0 40px rgba(57,246,255,.15); touch-action:none; }
+  .overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:rgba(8,8,20,.86); text-align:center; padding:24px; gap:14px; }
+  .hidden { display:none !important; }
+  h1 { margin:0; font-size:30px; letter-spacing:2px; color:var(--neon); text-shadow:0 0 12px var(--neon); }
+  p { margin:0; opacity:.85; font-size:14px; line-height:1.5; max-width:320px; }
+  .stat { font-size:16px; }
+  .stat b { color:var(--gold); }
+  button { font:inherit; font-size:15px; padding:12px 20px; border:none; border-radius:10px; cursor:pointer;
+    background:var(--neon); color:#04121a; font-weight:700; min-width:200px; }
+  button.alt { background:transparent; color:var(--neon); border:1px solid var(--neon); }
+  button.gold { background:var(--gold); color:#1a1400; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .adbox { border:1px dashed var(--gold); border-radius:10px; padding:16px; color:var(--gold); font-size:13px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+  .small { font-size:12px; opacity:.6; }
+  #hud { position:absolute; top:10px; left:0; right:0; display:flex; justify-content:space-between;
+    padding:0 16px; font-size:14px; font-weight:700; pointer-events:none; }
+  #hud .gold { color:var(--gold); }
+  #demoBadge { position:absolute; top:36px; left:16px; font-size:11px; letter-spacing:2px;
+    color:#ff3b6b; border:1px solid #ff3b6b; border-radius:6px; padding:2px 8px; pointer-events:none; }
+</style>
+</head>
+<body>
+<script>
+// GameDistribution SDK (gameId 绑定 79525)
+window["GD_OPTIONS"] = {
+  "gameId": "b7867b4472e94263a7beb77a74e8a687",
+  "onEvent": function(event) {
+    switch (event.name) {
+      case "SDK_GAME_START":
+        if (window.__ndResumeAd) window.__ndResumeAd();
+        break;
+      case "SDK_GAME_PAUSE":
+        if (window.__ndPauseAd) window.__ndPauseAd();
+        break;
+      case "SDK_REWARDED_WATCH_COMPLETE":
+        if (window.__ndRewarded) window.__ndRewarded();
+        break;
+    }
+  },
+};
+(function(d, s, id) {
+  var js, fjs = d.getElementsByTagName(s)[0];
+  if (d.getElementById(id)) return;
+  js = d.createElement(s); js.id = id;
+  js.src = 'https://html5.api.gamedistribution.com/main.min.js';
+  fjs.parentNode.insertBefore(js, fjs);
+}(document, 'script', 'gamedistribution-jssdk'));
+</script>
+<div id="wrap">
+  <canvas id="game"></canvas>
+  <div id="demoBadge" class="hidden">AUTOPLAY</div>
+  <div id="hud" class="hidden">
+    <div>SCORE <span id="score">0</span></div>
+    <div class="gold">◎ <span id="coins">0</span></div>
+  </div>
+
+  <!-- Start -->
+  <div id="start" class="overlay">
+    <h1>NEON DODGE</h1>
+    <p>Dodge the red blocks, grab the gold coins. It gets faster.<br>Mouse / arrow keys / touch.</p>
+    <p class="stat">Best: <b id="best0">0</b> &nbsp;|&nbsp; Coins: <b id="wallet0">0</b></p>
+    <button id="btnStart">PLAY</button>
+    <button id="btnBuy" class="gold">+500 Coins · $0.99 (IAP demo)</button>
+    <p class="small">Monetization scaffold: rewarded ad revive + coin IAP. Live builds wire portal SDKs.</p>
+  </div>
+
+  <!-- Game over -->
+  <div id="over" class="overlay hidden">
+    <h1 style="color:var(--danger);text-shadow:0 0 12px var(--danger)">GAME OVER</h1>
+    <p class="stat">Score <b id="finalScore">0</b> &nbsp;|&nbsp; Coins <b id="finalCoins">0</b></p>
+    <p class="stat">Best <b id="best1">0</b></p>
+    <div class="row">
+      <button id="btnAd">Watch ad to revive (free)</button>
+      <button id="btnRevive" class="alt">Revive for 500 coins</button>
+    </div>
+    <button id="btnRetry" class="alt">Play again</button>
+    <button id="btnBuy2" class="gold">+500 Coins · $0.99 (IAP demo)</button>
+  </div>
+
+  <!-- Ad playing -->
+  <div id="ad" class="overlay hidden">
+    <div class="adbox">Ad playing… (placeholder — real build uses rewarded video)<br><span id="adT">2</span>s</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const cv = document.getElementById('game');
+  const ctx = cv.getContext('2d');
+  const W = 400, H = 640;
+  cv.width = W; cv.height = H;
+  const DEMO = new URLSearchParams(location.search).has('demo');
+  function fit() {
+    const s = Math.min(window.innerWidth / W, window.innerHeight / H);
+    cv.style.width = (W * s) + 'px';
+    cv.style.height = (H * s) + 'px';
+  }
+  fit(); addEventListener('resize', fit);
+
+  const $ = id => document.getElementById(id);
+  const LS_BEST = 'nd_best', LS_COINS = 'nd_coins';
+  let best = +(localStorage.getItem(LS_BEST) || 0);
+  let wallet = +(localStorage.getItem(LS_COINS) || 0);
+
+  // ---- audio (synth, zero assets) ----
+  let actx = null;
+  function audio() { if (!actx) { try { actx = new (window.AudioContext||window.webkitAudioContext)(); } catch(e){} } return actx; }
+  function beep(freq, dur, type, vol, slide) {
+    const a = audio(); if (!a || DEMO || adPause) return;
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type || 'square'; o.frequency.value = freq;
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, a.currentTime + dur);
+    g.gain.setValueAtTime(vol || 0.08, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + dur);
+    o.connect(g); g.connect(a.destination);
+    o.start(); o.stop(a.currentTime + dur);
+  }
+  const sCoin = () => { beep(880, .09, 'square', .07, 1420); };
+  const sHit  = () => { beep(220, .3, 'sawtooth', .1, 60); };
+  const sGo   = () => { beep(440, .12, 'triangle', .08, 660); };
+
+  function refreshWallet() {
+    $('wallet0').textContent = wallet;
+    $('coins').textContent = wallet;
+    $('btnRevive').disabled = wallet < 500;
+  }
+  refreshWallet();
+  $('best0').textContent = best;
+  if (DEMO) $('demoBadge').classList.remove('hidden');
+
+  let state = 'menu';
+  let player, obstacles, coins, score, speed, spawnT, lastT, invuln;
+
+  function reset() {
+    player = { x: W/2, y: H - 70, r: 16, tx: W/2 };
+    obstacles = []; coins = [];
+    score = 0; speed = 180; spawnT = 0; invuln = 0;
+    $('score').textContent = 0; $('coins').textContent = wallet;
+  }
+
+  function spawn() {
+    const laneW = W / 5;
+    const gap = Math.floor(Math.random() * 5);
+    for (let i = 0; i < 5; i++) {
+      if (i === gap) {
+        if (Math.random() < 0.7) coins.push({ x: i*laneW + laneW/2, y: -20, r: 10, got:false });
+      } else {
+        obstacles.push({ x: i*laneW + laneW/2, y: -20, w: laneW-10, h: 26 });
+      }
+    }
+  }
+
+  function startGame() {
+    reset();
+    state = 'play';
+    $('start').classList.add('hidden');
+    $('over').classList.add('hidden');
+    $('hud').classList.remove('hidden');
+    lastT = performance.now();
+    sGo();
+    requestAnimationFrame(loop);
+  }
+
+  // simple autopilot for demo recording
+  function autopilot() {
+    let target = W/2;
+    for (const o of obstacles) {
+      if (o.y > player.y - 230 && o.y < player.y + 6 &&
+          Math.abs(o.x - player.x) < o.w/2 + player.r + 10) {
+        target = o.x + (player.x <= o.x ? -(o.w/2 + player.r + 34) : (o.w/2 + player.r + 34));
+        player.tx = Math.max(player.r, Math.min(W - player.r, target));
+        return;
+      }
+    }
+    let bestC = null;
+    for (const c of coins) {
+      if (c.y > 60 && (!bestC || c.y > bestC.y)) bestC = c;
+    }
+    if (bestC) target = bestC.x;
+    player.tx = Math.max(player.r, Math.min(W - player.r, target));
+  }
+
+  let adPause = false;
+  let rewardedCb = null;
+  window.__ndPauseAd = () => { adPause = true; };
+  window.__ndResumeAd = () => { adPause = false; };
+  window.__ndRewarded = () => { if (rewardedCb) { const cb = rewardedCb; rewardedCb = null; cb(); } };
+  function showSafeAd() {
+    try { if (typeof gdsdk !== 'undefined' && gdsdk.showAd) { gdsdk.showAd(); } } catch (e) {}
+  }
+  function showRewardedAd(onReward) {
+    try {
+      if (typeof gdsdk !== 'undefined' && gdsdk.showAd) {
+        rewardedCb = onReward;
+        try { gdsdk.showAd('rewarded'); } catch (e) { onReward(); }
+        return;
+      }
+    } catch (e) {}
+    // 本地/无 SDK 降级：模拟 2 秒激励视频
+    const t0 = Date.now();
+    const iv = setInterval(() => { if (Date.now() - t0 > 2000) { clearInterval(iv); onReward(); } }, 250);
+  }
+  function loop(now) {
+    if (state !== 'play') return;
+    const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+    if (adPause) { render(); requestAnimationFrame(loop); return; }
+    if (DEMO) autopilot();
+    update(dt); render();
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt) {
+    speed += dt * 6;
+    score += dt * 10;
+    $('score').textContent = Math.floor(score);
+
+    player.x += (player.tx - player.x) * Math.min(1, dt * 12);
+    player.x = Math.max(player.r, Math.min(W - player.r, player.x));
+    if (invuln > 0) invuln -= dt;
+
+    spawnT -= dt;
+    if (spawnT <= 0) { spawn(); spawnT = Math.max(0.45, 1.1 - speed/600); }
+
+    const dy = speed * dt;
+    for (const o of obstacles) {
+      o.y += dy;
+      if (invuln <= 0 &&
+          Math.abs(o.x - player.x) < o.w/2 + player.r*0.6 &&
+          Math.abs(o.y - player.y) < o.h/2 + player.r*0.6) {
+        return die();
+      }
+    }
+    obstacles = obstacles.filter(o => o.y < H + 40);
+
+    for (const c of coins) {
+      c.y += dy;
+      if (!c.got && Math.hypot(c.x - player.x, c.y - player.y) < c.r + player.r) {
+        c.got = true; wallet++; refreshWallet(); sCoin();
+        localStorage.setItem(LS_COINS, wallet);
+      }
+    }
+    coins = coins.filter(c => !c.got && c.y < H + 40);
+  }
+
+  function render() {
+    ctx.clearRect(0,0,W,H);
+    ctx.strokeStyle = 'rgba(57,246,255,.06)';
+    for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+    for (const c of coins) {
+      ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, 7); ctx.fillStyle = '#ffd23f';
+      ctx.shadowColor='#ffd23f'; ctx.shadowBlur=12; ctx.fill(); ctx.shadowBlur=0;
+    }
+    for (const o of obstacles) {
+      ctx.fillStyle = '#ff3b6b'; ctx.shadowColor='#ff3b6b'; ctx.shadowBlur=10;
+      ctx.fillRect(o.x - o.w/2, o.y - o.h/2, o.w, o.h); ctx.shadowBlur=0;
+    }
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.r, 0, 7);
+    ctx.fillStyle = invuln > 0 ? '#ffffff' : '#39f6ff';
+    ctx.shadowColor='#39f6ff'; ctx.shadowBlur=16; ctx.fill(); ctx.shadowBlur=0;
+  }
+
+  function die() {
+    state = 'dead';
+    const fs = Math.floor(score);
+    if (fs > best) { best = fs; localStorage.setItem(LS_BEST, best); }
+    if (DEMO) { startGame(); return; }  // demo keeps running forever
+    sHit();
+    $('finalScore').textContent = fs;
+    $('finalCoins').textContent = wallet;
+    $('best1').textContent = best;
+    $('hud').classList.add('hidden');
+    $('over').classList.remove('hidden');
+  }
+
+  function revive(byAd) {
+    if (!byAd) { wallet -= 500; refreshWallet(); localStorage.setItem(LS_COINS, wallet); }
+    obstacles = obstacles.filter(o => o.y > 140);
+    invuln = 2.2; state = 'play';
+    $('over').classList.add('hidden'); $('hud').classList.remove('hidden');
+    lastT = performance.now(); requestAnimationFrame(loop);
+  }
+
+  function playAd() {
+    state = 'ad';
+    $('over').classList.add('hidden');
+    showRewardedAd(() => { revive(true); });
+  }
+
+  function setTarget(clientX) {
+    const r = cv.getBoundingClientRect();
+    player.tx = (clientX - r.left) / r.width * W;
+  }
+  cv.addEventListener('mousemove', e => { if (state==='play' && !DEMO) setTarget(e.clientX); });
+  cv.addEventListener('touchmove', e => { if (state==='play' && !DEMO){ setTarget(e.touches[0].clientX); e.preventDefault(); } }, {passive:false});
+  cv.addEventListener('touchstart', e => { if (state==='play' && !DEMO){ setTarget(e.touches[0].clientX); e.preventDefault(); } }, {passive:false});
+  addEventListener('keydown', e => {
+    if (state!=='play' || DEMO) return;
+    if (e.key==='ArrowLeft') player.tx = Math.max(player.r, player.tx - 40);
+    if (e.key==='ArrowRight') player.tx = Math.min(W-player.r, player.tx + 40);
+  });
+
+  $('btnStart').onclick = () => { showSafeAd(); startGame(); };
+  $('btnRetry').onclick = () => { showSafeAd(); startGame(); };
+  $('btnAd').onclick = playAd;
+  $('btnRevive').onclick = () => revive(false);
+  function buyMock() {
+    alert('IAP demo: this would charge $0.99 and credit 500 coins.\nReal build: portal IAP SDK or Google Play Billing.');
+    wallet += 500; refreshWallet(); localStorage.setItem(LS_COINS, wallet);
+  }
+  $('btnBuy').onclick = buyMock;
+  $('btnBuy2').onclick = buyMock;
+
+  if (DEMO) startGame();  // demo boots straight into autopilot
+})();
+</script>
+</body>
+</html>
